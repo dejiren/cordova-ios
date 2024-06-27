@@ -174,7 +174,12 @@
         decision = WKPermissionDecisionGrant;
     }
     else {
-        if ([origin.host isEqualToString:webView.URL.host]) {
+        NSLog(@"origin.protocol host webView.URL.host %@ %@ %@",  origin.protocol, origin.host, webView.URL.host);
+        if ([origin.protocol isEqualToString:@"file"]) {
+            NSLog(@"Supressing media permission request for file origin");
+            decision = WKPermissionDecisionGrant;
+        } 
+        else if ([origin.host isEqualToString:webView.URL.host]) {
             decision = WKPermissionDecisionGrant;
         }
         else {
