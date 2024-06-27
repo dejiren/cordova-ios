@@ -164,6 +164,7 @@
 {
     WKPermissionDecision decision;
     
+    NSLog(@"_mediaPermissionGrantType origin.protocol host webView.URL.host %@ %@ %@ %@",  _mediaPermissionGrantType, origin.protocol, origin.host, webView.URL.host);
     if (_mediaPermissionGrantType == CDVWebViewPermissionGrantType_Prompt) {
         decision = WKPermissionDecisionPrompt;
     }
@@ -174,7 +175,6 @@
         decision = WKPermissionDecisionGrant;
     }
     else {
-        NSLog(@"origin.protocol host webView.URL.host %@ %@ %@",  origin.protocol, origin.host, webView.URL.host);
         if ([origin.protocol isEqualToString:@"file"]) {
             NSLog(@"Supressing media permission request for file origin");
             decision = WKPermissionDecisionGrant;
