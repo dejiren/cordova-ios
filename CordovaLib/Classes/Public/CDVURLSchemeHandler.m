@@ -191,9 +191,11 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
         plugin = [self.handlerMap objectForKey:urlSchemeTask];
     }
 
-    if (![plugin isEqual:[NSNull null]] && [plugin respondsToSelector:@selector(stopSchemeTask:)]) {
-    SEL selector = NSSelectorFromString(@"stopSchemeTask:");
-        (((void (*)(id, SEL, id <WKURLSchemeTask>))objc_msgSend)(plugin, selector, urlSchemeTask));
+    if (![plugin isEqual:[NSNull null]]) {
+        SEL selector = NSSelectorFromString(@"stopSchemeTask:");
+        if ([plugin respondsToSelector:selector]) {
+            (((void (*)(id, SEL, id <WKURLSchemeTask>))objc_msgSend)(plugin, selector, urlSchemeTask));
+        }
     }
 
     @synchronized(self.handlerMap) {
@@ -234,7 +236,7 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 
     NSString *type;
     [url getResourceValue:&type forKey:NSURLTypeIdentifierKey error:nil];
-    return (NSString *)UTTypeCopyPreferredTagWithClass((CFStringRef)type, kUTTagClassMIMEType);
+    return (__bridge NSString *)UTTypeCopyPreferredTagWithClass((__bridge CFStringRef)type, kUTTagClassMIMEType);
 }
 
 - (nullable NSData *)readFromFileHandle:(NSFileHandle *)handle upTo:(NSUInteger)length error:(NSError **)err
