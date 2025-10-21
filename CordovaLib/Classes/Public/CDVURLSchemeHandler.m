@@ -249,14 +249,16 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 
 - (NSURL *)fileURLForRequestURL:(NSURL *)url
 {
-    NSURL *resDir = [[NSBundle mainBundle] URLForResource:self.viewController.wwwFolderName withExtension:nil];
     NSURL *filePath;
 
     if ([url.path hasPrefix:@"/_app_file_"]) {
         NSString *path = [url.path stringByReplacingOccurrencesOfString:@"/_app_file_" withString:@""];
-        filePath = [resDir URLByAppendingPathComponent:path];
-        NSLog(@"[CDVURLSchemeHandler] Using _app_file_ path: %@", path);
+        // For _app_file_ paths, use the path directly without www folder
+        filePath = [NSURL fileURLWithPath:path];
+        NSLog(@"[CDVURLSchemeHandler] Using _app_file_ path directly: %@", path);
     } else {
+        // For regular paths, use www folder
+        NSURL *resDir = [[NSBundle mainBundle] URLForResource:self.viewController.wwwFolderName withExtension:nil];
         if ([url.path isEqualToString:@""] || [url.pathExtension isEqualToString:@""]) {
             filePath = [resDir URLByAppendingPathComponent:self.viewController.startPage];
             NSLog(@"[CDVURLSchemeHandler] Using start page: %@", self.viewController.startPage);
