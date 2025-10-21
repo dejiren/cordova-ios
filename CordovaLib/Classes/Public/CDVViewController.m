@@ -164,6 +164,8 @@
         self.startPage = @"index.html";
     }
 
+    self.appScheme = [self.settings cordovaSettingForKey:@"Scheme"] ?: @"app";
+
     // Initialize the plugin objects dict.
     self.pluginObjects = [[NSMutableDictionary alloc] initWithCapacity:20];
 }

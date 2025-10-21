@@ -217,7 +217,7 @@
 
     // Do not configure the scheme handler if the scheme is default (file)
     if(!self.cdvIsFileScheme) {
-        self.schemeHandler = [[CDVURLSchemeHandler alloc] initWithVC:vc];
+        self.schemeHandler = [[CDVURLSchemeHandler alloc] initWithViewController:self.viewController];
         [configuration setURLSchemeHandler:self.schemeHandler forURLScheme:scheme];
     }
 

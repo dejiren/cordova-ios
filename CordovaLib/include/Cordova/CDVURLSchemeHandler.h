@@ -24,11 +24,11 @@
 
 @interface CDVURLSchemeHandler : NSObject <WKURLSchemeHandler>
 
-@property (nonatomic, weak) CDVViewController* viewController;
+@property (nonatomic, assign) CDVViewController* viewController;
 
-@property (nonatomic) CDVPlugin* schemePlugin;
+@property (nonatomic, strong) NSMapTable <id <WKURLSchemeTask>, CDVPlugin *> *handlerMap;
 
-- (instancetype)initWithVC:(CDVViewController *)controller;
+- (instancetype)initWithViewController:(CDVViewController *)controller;
 
 
 @end
