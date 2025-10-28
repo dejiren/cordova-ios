@@ -65,7 +65,20 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, strong) NSMutableDictionary* settings;
 @property (nonatomic, readonly, strong) NSXMLParser* configParser;
 
-@property (nonatomic, readwrite, copy) NSString* appScheme;
+/*
+ The scheme being used to load web content from the app bundle into the Cordova
+ web view.
+
+ The default value is `app` but can be customized via the `Scheme` preference
+ in the Cordova XML configuration file. Setting this to `file` will results in
+ web content being loaded using the File URL protocol, which has inherent
+ security limitations. It is encouraged that you use a custom scheme to load
+ your app content.
+
+ It is not valid to set this to an existing protocol scheme such as `http` or
+ `https`.
+ */
+@property (nonatomic, nullable, readwrite, copy) NSString* appScheme;
 @property (nonatomic, readwrite, copy) NSString* configFile;
 @property (nonatomic, readwrite, copy) NSString* wwwFolderName;
 @property (nonatomic, readwrite, copy) NSString* startPage;
