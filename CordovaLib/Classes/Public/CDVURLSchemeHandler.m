@@ -50,20 +50,15 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 
 - (void)webView:(WKWebView *)webView startURLSchemeTask:(id <WKURLSchemeTask>)urlSchemeTask
 {
-    NSLog(@"[CDVURLSchemeHandler] startURLSchemeTask called for URL: %@", urlSchemeTask.request.URL);
-    
     // Give plugins the chance to handle the url
     NSDictionary *pluginObjects = [[self.viewController pluginObjects] copy];
-    NSLog(@"[CDVURLSchemeHandler] Checking %lu plugins for URL handling", (unsigned long)pluginObjects.count);
-    
+
     for (NSString* pluginName in pluginObjects) {
         CDVPlugin *plugin = [self.viewController.pluginObjects objectForKey:pluginName];
         SEL selector = NSSelectorFromString(@"overrideSchemeTask:");
         if ([plugin respondsToSelector:selector]) {
-            NSLog(@"[CDVURLSchemeHandler] Plugin %@ can handle scheme task", pluginName);
             BOOL handledRequest = (((BOOL (*)(id, SEL, id <WKURLSchemeTask>))objc_msgSend)(plugin, selector, urlSchemeTask));
             if (handledRequest) {
-                NSLog(@"[CDVURLSchemeHandler] Plugin %@ handled the request", pluginName);
                 // Store the plugin that is handling this particular request
                 [self.handlerMap setObject:plugin forKey:urlSchemeTask];
                 return;
@@ -72,29 +67,22 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
     }
 
     NSURLRequest *req = urlSchemeTask.request;
-    NSLog(@"[CDVURLSchemeHandler] Request scheme: %@, expected scheme: %@", req.URL.scheme, self.viewController.appScheme);
-    
+
     if (![req.URL.scheme isEqualToString:self.viewController.appScheme]) {
-        NSLog(@"[CDVURLSchemeHandler] Scheme mismatch, ignoring request");
         return;
     }
 
     // Indicate that we are handling this task, by adding an entry with a null plugin
     // We do this so that we can (in future) detect if the task is cancelled before we finished feeding it response data
     [self.handlerMap setObject:(id)[NSNull null] forKey:urlSchemeTask];
-    NSLog(@"[CDVURLSchemeHandler] Starting background processing for URL: %@", req.URL);
 
     [self.viewController.commandDelegate runInBackground:^{
-        NSLog(@"[CDVURLSchemeHandler] Background thread started for URL: %@", req.URL);
-        
         NSURL *fileURL = [self fileURLForRequestURL:req.URL];
-        NSLog(@"[CDVURLSchemeHandler] Resolved file URL: %@", fileURL);
-        
+
         NSError *error;
 
         NSFileHandle *fileHandle = [NSFileHandle fileHandleForReadingFromURL:fileURL error:&error];
         if (!fileHandle || error) {
-            NSLog(@"[CDVURLSchemeHandler] Failed to open file: %@, error: %@", fileURL, error);
             if ([self taskActive:urlSchemeTask]) {
                 [urlSchemeTask didFailWithError:error];
             }
@@ -109,8 +97,6 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
         NSString *mimeType = [self getMimeType:fileURL] ?: @"application/octet-stream";
         NSNumber *fileLength;
         [fileURL getResourceValue:&fileLength forKey:NSURLFileSizeKey error:nil];
-        
-        NSLog(@"[CDVURLSchemeHandler] File info - MIME: %@, Size: %@ bytes", mimeType, fileLength);
 
         NSNumber *responseSize = fileLength;
         NSUInteger responseSent = 0;
@@ -123,8 +109,7 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
         // Check for Range header - only for media files
         NSString *rangeHeader = [urlSchemeTask.request valueForHTTPHeaderField:@"Range"];
         BOOL isMediaFile = [self isMediaFile:fileURL mimeType:mimeType];
-        NSLog(@"[CDVURLSchemeHandler] Range header: %@, Is media file: %@", rangeHeader, isMediaFile ? @"YES" : @"NO");
-        
+
         if (rangeHeader && isMediaFile) {
             NSRange range = NSMakeRange(NSNotFound, 0);
 
@@ -134,13 +119,11 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
                 NSUInteger start = (NSUInteger)[rangeParts[0] integerValue];
                 NSUInteger end = rangeParts.count > 1 && ![rangeParts[1] isEqualToString:@""] ? (NSUInteger)[rangeParts[1] integerValue] : [fileLength unsignedIntegerValue] - 1;
                 range = NSMakeRange(start, end - start + 1);
-                NSLog(@"[CDVURLSchemeHandler] Parsed range: %lu-%lu (length: %lu)", (unsigned long)range.location, (unsigned long)(range.location + range.length - 1), (unsigned long)range.length);
             }
 
             if (range.location != NSNotFound) {
                 // Ensure range is valid
                 if (range.location >= [fileLength unsignedIntegerValue] && [self taskActive:urlSchemeTask]) {
-                    NSLog(@"[CDVURLSchemeHandler] Range out of bounds, returning 416");
                     headers[@"Content-Range"] = [NSString stringWithFormat:@"bytes */%@", fileLength];
                     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:req.URL statusCode:416 HTTPVersion:@"HTTP/1.1" headerFields:headers];
                     [urlSchemeTask didReceiveResponse:response];
@@ -157,25 +140,21 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
                 statusCode = 206; // Partial Content
                 headers[@"Content-Range"] = [NSString stringWithFormat:@"bytes %lu-%lu/%@", (unsigned long)range.location, (unsigned long)(range.location + range.length - 1), fileLength];
                 headers[@"Content-Length"] = [NSString stringWithFormat:@"%lu", (unsigned long)range.length];
-                NSLog(@"[CDVURLSchemeHandler] Range request - Status: 206, Content-Range: %@", headers[@"Content-Range"]);
             }
         }
 
         NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:req.URL statusCode:statusCode HTTPVersion:@"HTTP/1.1" headerFields:headers];
-        NSLog(@"[CDVURLSchemeHandler] Sending response - Status: %ld, Headers: %@", (long)statusCode, headers);
-        
+
         if ([self taskActive:urlSchemeTask]) {
             [urlSchemeTask didReceiveResponse:response];
         }
 
         // Use chunked reading only for media files, otherwise read entire file
         if (isMediaFile) {
-            NSLog(@"[CDVURLSchemeHandler] Using chunked reading for media file");
             while ([self taskActive:urlSchemeTask] && responseSent < [responseSize unsignedIntegerValue]) {
                 @autoreleasepool {
                     NSData *data = [self readFromFileHandle:fileHandle upTo:FILE_BUFFER_SIZE error:&error];
                     if (!data || error) {
-                        NSLog(@"[CDVURLSchemeHandler] Error reading chunk: %@", error);
                         if ([self taskActive:urlSchemeTask]) {
                             [urlSchemeTask didFailWithError:error];
                         }
@@ -184,21 +163,17 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 
                     if ([self taskActive:urlSchemeTask]) {
                         [urlSchemeTask didReceiveData:data];
-                        NSLog(@"[CDVURLSchemeHandler] Sent chunk: %lu bytes (total sent: %lu)", (unsigned long)data.length, (unsigned long)(responseSent + data.length));
                     }
 
                     responseSent += data.length;
                 }
             }
         } else {
-            NSLog(@"[CDVURLSchemeHandler] Using single read for non-media file");
             // For non-media files, read entire file at once (original behavior)
             NSData *data = [self readFromFileHandle:fileHandle upTo:[responseSize unsignedIntegerValue] error:&error];
             if (data && [self taskActive:urlSchemeTask]) {
                 [urlSchemeTask didReceiveData:data];
-                NSLog(@"[CDVURLSchemeHandler] Sent entire file: %lu bytes", (unsigned long)data.length);
             } else if (error && [self taskActive:urlSchemeTask]) {
-                NSLog(@"[CDVURLSchemeHandler] Error reading entire file: %@", error);
                 [urlSchemeTask didFailWithError:error];
             }
         }
@@ -207,9 +182,6 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 
         if ([self taskActive:urlSchemeTask]) {
             [urlSchemeTask didFinish];
-            NSLog(@"[CDVURLSchemeHandler] Task completed successfully");
-        } else {
-            NSLog(@"[CDVURLSchemeHandler] Task was cancelled before completion");
         }
 
         @synchronized(self.handlerMap) {
@@ -220,8 +192,6 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 
 - (void)webView:(nonnull WKWebView *)webView stopURLSchemeTask:(nonnull id<WKURLSchemeTask>)urlSchemeTask
 {
-    NSLog(@"[CDVURLSchemeHandler] stopURLSchemeTask called for URL: %@", urlSchemeTask.request.URL);
-    
     CDVPlugin *plugin;
     @synchronized(self.handlerMap) {
         plugin = [self.handlerMap objectForKey:urlSchemeTask];
@@ -230,19 +200,13 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
     if (![plugin isEqual:[NSNull null]]) {
     SEL selector = NSSelectorFromString(@"stopSchemeTask:");
         if ([plugin respondsToSelector:selector]) {
-            NSLog(@"[CDVURLSchemeHandler] Calling stopSchemeTask on plugin");
             (((void (*)(id, SEL, id <WKURLSchemeTask>))objc_msgSend)(plugin, selector, urlSchemeTask));
-        } else {
-            NSLog(@"[CDVURLSchemeHandler] Plugin does not respond to stopSchemeTask");
         }
-    } else {
-        NSLog(@"[CDVURLSchemeHandler] No plugin handling this task");
     }
 
     @synchronized(self.handlerMap) {
         [self.handlerMap removeObjectForKey:urlSchemeTask];
     }
-    NSLog(@"[CDVURLSchemeHandler] Task removed from handler map");
 }
 
 #pragma mark - Utility methods
@@ -255,34 +219,29 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
         NSString *path = [url.path stringByReplacingOccurrencesOfString:@"/_app_file_" withString:@""];
         // For _app_file_ paths, use the path directly without www folder
         filePath = [NSURL fileURLWithPath:path];
-        NSLog(@"[CDVURLSchemeHandler] Using _app_file_ path directly: %@", path);
     } else {
         // For regular paths, use www folder
         NSURL *resDir = [[NSBundle mainBundle] URLForResource:self.viewController.wwwFolderName withExtension:nil];
         if ([url.path isEqualToString:@""] || [url.pathExtension isEqualToString:@""]) {
             filePath = [resDir URLByAppendingPathComponent:self.viewController.startPage];
-            NSLog(@"[CDVURLSchemeHandler] Using start page: %@", self.viewController.startPage);
         } else {
             filePath = [resDir URLByAppendingPathComponent:url.path];
-            NSLog(@"[CDVURLSchemeHandler] Using direct path: %@", url.path);
         }
     }
 
     NSURL *result = filePath.URLByStandardizingPath;
-    NSLog(@"[CDVURLSchemeHandler] Final file URL: %@", result);
     return result;
 }
 
 -(NSString *)getMimeType:(NSURL *)url
 {
     NSString *mimeType = nil;
-    
+
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000
     if (@available(iOS 14.0, *)) {
         UTType *uti;
         [url getResourceValue:&uti forKey:NSURLContentTypeKey error:nil];
         mimeType = [uti preferredMIMEType];
-        NSLog(@"[CDVURLSchemeHandler] iOS 14+ MIME type: %@", mimeType);
     }
 #endif
 
@@ -290,9 +249,8 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
         NSString *type;
         [url getResourceValue:&type forKey:NSURLTypeIdentifierKey error:nil];
         mimeType = (__bridge NSString *)UTTypeCopyPreferredTagWithClass((__bridge CFStringRef)type, kUTTagClassMIMEType);
-        NSLog(@"[CDVURLSchemeHandler] Legacy MIME type: %@", mimeType);
     }
-    
+
     return mimeType ?: @"application/octet-stream";
 }
 
@@ -336,21 +294,18 @@ static const NSUInteger FILE_BUFFER_SIZE = 1024 * 1024 * 4; // 4 MiB
 {
     // Check by file extension
     BOOL isMediaByExtension = [self isMediaExtension:fileURL.pathExtension];
-    NSLog(@"[CDVURLSchemeHandler] Extension check: %@ -> %@", fileURL.pathExtension, isMediaByExtension ? @"YES" : @"NO");
-    
+
     if (isMediaByExtension) {
         return YES;
     }
-    
+
     // Check by MIME type
     NSArray *audioMimeTypes = @[@"audio/m4a", @"audio/mp3", @"audio/mp4", @"audio/mpeg", @"audio/vnd.wave", @"audio/wav"];
     NSArray *videoMimeTypes = @[@"video/mp4", @"video/quicktime"];
-    
-    BOOL isMediaByMime = [audioMimeTypes containsObject:mimeType.lowercaseString] || 
+
+    BOOL isMediaByMime = [audioMimeTypes containsObject:mimeType.lowercaseString] ||
                         [videoMimeTypes containsObject:mimeType.lowercaseString];
-    
-    NSLog(@"[CDVURLSchemeHandler] MIME type check: %@ -> %@", mimeType, isMediaByMime ? @"YES" : @"NO");
-    
+
     return isMediaByMime;
 }
 
